@@ -12,11 +12,8 @@ This project aims to create a chatbot using the Transformer encoder-decoder mode
 
 ## Requirements
 
-- Python (version X.X.X)
-- PyTorch (version X.X.X)
-- Transformers library (version X.X.X)
-- Flask (version X.X.X) - for running the web interface
-- Other dependencies specified in `requirements.txt`
+- Python 
+- Tensorflow library (version 2.10.0)
 
 ## Installation
 
@@ -26,3 +23,5 @@ This project aims to create a chatbot using the Transformer encoder-decoder mode
 4. To train the model, edit the preprocess.py file and replace your dataset with your own. 
 5. Run the main.py file to start the training process. You can play around with the hyperparameters to best fit your needs.
 6. Run the chat.py file to load the trained model :)
+   
+<img width="862" alt="chat" src="https://github.com/Sunehildeep/ChatBot-TransformerAI/assets/23412507/508d6e5e-a397-4b10-8813-4aba390167a8">
