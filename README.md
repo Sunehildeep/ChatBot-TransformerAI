@@ -24,4 +24,4 @@ This project aims to create a chatbot using the Transformer encoder-decoder mode
 5. Run the main.py file to start the training process. You can play around with the hyperparameters to best fit your needs.
 6. Run the chat.py file to load the trained model :)
    
-<img width="862" alt="chat" src="https://github.com/Sunehildeep/ChatBot-TransformerAI/assets/23412507/508d6e5e-a397-4b10-8813-4aba390167a8">
+![image](https://github.com/Sunehildeep/ChatBot-TransformerAI/assets/23412507/a7120373-9fad-4ab2-8ee9-2d67347e064b)
