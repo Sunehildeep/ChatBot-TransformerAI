@@ -3,99 +3,83 @@ from model import Transformer, create_masks
 import tensorflow as tf
 import numpy as np
 
-max_text_len = 80
+class ChatBot:
+    def __init__(self, tokenizer_input_path='tokenizer_input.pickle', tokenizer_output_path='tokenizer_output.pickle',
+                 num_layers=3, d_model=128, dff=512, num_heads=16, dropout_rate=0.1, max_text_len=80):
+        self.max_text_len = max_text_len
+        self.load_tokenizers(tokenizer_input_path, tokenizer_output_path)
+        self.build_model(num_layers, d_model, dff, num_heads, dropout_rate)
+        self.load_checkpoint()
 
-with open('tokenizer_input.pickle', 'rb') as f:
-    tokenizer_input = pickle.load(f)
+    def load_tokenizers(self, tokenizer_input_path, tokenizer_output_path):
+        with open(tokenizer_input_path, 'rb') as f:
+            self.tokenizer_input = pickle.load(f)
 
-with open('tokenizer_output.pickle', 'rb') as f:
-    tokenizer_output = pickle.load(f)
+        with open(tokenizer_output_path, 'rb') as f:
+            self.tokenizer_output = pickle.load(f)
 
-num_layers = 2
-d_model = 256
-dff = 512
-num_heads = 4
-input_vocab_size = len(tokenizer_input.index_word) + 2
-target_vocab_size = len(tokenizer_output.index_word) + 2
-dropout_rate = 0.2
+    def build_model(self, num_layers, d_model, dff, num_heads, dropout_rate):
+        input_vocab_size = len(self.tokenizer_input.index_word) + 2
+        target_vocab_size = len(self.tokenizer_output.index_word) + 2
+        self.transformer = Transformer(num_layers, d_model, num_heads, dff, input_vocab_size, target_vocab_size,
+                                       pe_input=2048, pe_target=2048, rate=dropout_rate)
 
-transformer = Transformer(num_layers, d_model, num_heads, dff, input_vocab_size, target_vocab_size, pe_input=2048, pe_target=2048, rate=dropout_rate)
+    def load_checkpoint(self, optimizer=tf.keras.optimizers.RMSprop()):
+        checkpoint_path = "./checkpoints_test/train"
+        self.ckpt = tf.train.Checkpoint(transformer=self.transformer, optimizer=optimizer)
+        self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, checkpoint_path, max_to_keep=5)
 
-optimizer = tf.keras.optimizers.RMSprop()
+        if self.ckpt_manager.latest_checkpoint:
+            self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
+            print('Latest checkpoint restored!!')
 
-checkpoint_path = "./checkpoints_test/train"
+    def search(self, text, width=5, temperature=0.9):
+        start_token = [self.tokenizer_input.word_index['<start>']]
+        end_token = [self.tokenizer_input.word_index['<end>']]
 
-ckpt = tf.train.Checkpoint(transformer=transformer,
-                           optimizer=optimizer)
+        inp_sentence = start_token + self.tokenizer_input.texts_to_sequences([text])[0] + end_token
+        inp_sentence = tf.keras.preprocessing.sequence.pad_sequences([inp_sentence], maxlen=self.max_text_len,
+                                                                     padding='post')
 
-ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
+        decoder_input = [self.tokenizer_output.word_index['<start>']]
+        decoder_input = tf.expand_dims(decoder_input, 0)
 
+        for i in range(self.max_text_len):
+            enc_padding_mask, combined_mask, dec_padding_mask = create_masks(inp_sentence, decoder_input)
 
-def search(text, model, tokenizer_q, tokenizer_a, width=5, temperature=0.9):
-    start_token = [tokenizer_q.word_index['<start>']]
-    end_token = [tokenizer_q.word_index['<end>']]
+            predictions, attention_weights = self.transformer(inp_sentence, decoder_input, False, enc_padding_mask,
+                                                               combined_mask, dec_padding_mask)
 
-    # All questions have the start and end token
-    inp_sentence = start_token + tokenizer_q.texts_to_sequences([text])[0] + end_token
-    inp_sentence = tf.keras.preprocessing.sequence.pad_sequences([inp_sentence], maxlen=max_text_len, padding='post')
+            predictions = predictions[:, -1:, :]
+            predictions = tf.nn.softmax(predictions, axis=-1)
+            predictions /= temperature
 
-    # 'answers' start token : 27358
-    decoder_input = [tokenizer_a.word_index['<start>']]
-    decoder_input = tf.expand_dims(decoder_input, 0)
+            top_k_predictions = tf.math.top_k(predictions, k=width)
+            indices = top_k_predictions.indices.numpy()
+            values = top_k_predictions.values.numpy()
 
-    for i in range(max_text_len):
-        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(inp_sentence, decoder_input)
+            probabilities = values / np.sum(values)
 
-        # predictions.shape == (batch_size, seq_len, vocab_size)
-        predictions, attention_weights = model(inp_sentence,
-                                               decoder_input,
-                                               False,
-                                               enc_padding_mask,
-                                               combined_mask,
-                                               dec_padding_mask)
+            predicted_id = np.random.choice(indices[0][0], p=probabilities[0][0])
 
-        # select the last word from the seq_len dimension
-        predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
+            predicted_id = tf.expand_dims([predicted_id], 0)
 
-        # apply a softmax to normalize the predictions into a probability distribution
-        predictions = tf.nn.softmax(predictions, axis=-1)
+            if predicted_id == self.tokenizer_output.word_index['<end>']:
+                break
 
-        # apply temperature to control the randomness of sampling
-        predictions /= temperature
+            decoder_input = tf.concat([decoder_input, predicted_id], axis=-1)
 
-        # use top-k sampling to introduce randomness in choosing the predicted_id
-        top_k_predictions = tf.math.top_k(predictions, k=width)
-        indices = top_k_predictions.indices.numpy()
-        values = top_k_predictions.values.numpy()
+        decoder_input = decoder_input[:, 1:]
+        return tf.squeeze(decoder_input, axis=0), attention_weights
 
-        probabilities = values / np.sum(values)
-
-        # choose one of the top k indices based on their probability
-        predicted_id = np.random.choice(indices[0][0], p=probabilities[0][0])
-
-        predicted_id = tf.expand_dims([predicted_id], 0)
-
-        # return the result if the predicted_id is equal to the end token
-        if predicted_id == tokenizer_a.word_index['<end>']:
-            break
-
-        # concatenate the predicted_id to the output which is given to the decoder
-        # as its input.
-        decoder_input = tf.concat([decoder_input, predicted_id], axis=-1)
+    def chat(self):
+        while True:
+            text = input("Enter question: ")
+            output, _ = self.search(text)
+            answer = self.tokenizer_output.sequences_to_texts([output.numpy()])[0]
+            print(f"Answer: {answer}\n")
 
 
-    # Remove the start token from the predictions
-    decoder_input = decoder_input[:, 1:]
-    return tf.squeeze(decoder_input, axis=0), attention_weights
-
-
-# if a checkpoint exists, restore the latest checkpoint.
-if ckpt_manager.latest_checkpoint:
-    ckpt.restore(ckpt_manager.latest_checkpoint)
-    print ('Latest checkpoint restored!!')
-
-# #Interference
-while True:
-    text = input("Enter question: ")
-    output, _ = search(text, transformer, tokenizer_input, tokenizer_output)
-    print("Answer: {}\n".format(tokenizer_output.sequences_to_texts([output.numpy()])[0]))
+if __name__ == '__main__':
+    chatbot = ChatBot()
+    chatbot.chat()
