@@ -6,13 +6,14 @@ import re
 import pickle
 
 class DataProcessor:
-    def __init__(self, file_path, max_text_len=80, batch_size=256, buffer_size=20000):
+    def __init__(self, file_path, max_text_len=150, batch_size=512, buffer_size=20000):
         self.file_path = file_path
         self.max_text_len = max_text_len
         self.batch_size = batch_size
+        self.char_level = False
         self.buffer_size = buffer_size
-        self.tokenizer_input = Tokenizer(filters='', char_level=False, lower=True)
-        self.tokenizer_output = Tokenizer(filters='', char_level=False, lower=True)
+        self.tokenizer_input = Tokenizer(filters='', char_level=self.char_level, lower=True)
+        self.tokenizer_output = Tokenizer(filters='', char_level=self.char_level, lower=True)
         self.data = None
         self.progress_train_length = None
         self.progress_test_length = None
@@ -206,12 +207,35 @@ class DataProcessor:
         self.data['answer'] = self.data['answer'].apply(lambda x: re.sub(r'http\S+', '', x))
         self.data['question'] = self.data['question'].apply(lambda x: re.sub(r'\s+', ' ', x))
         self.data['answer'] = self.data['answer'].apply(lambda x: re.sub(r'\s+', ' ', x))
-        self.data['question'] = self.data['question'].apply(lambda x: '<start> ' + x + ' <end>')
-        self.data['answer'] = self.data['answer'].apply(lambda x: '<start> ' + x + ' <end>')
+        if self.char_level == False:
+            self.data['question'] = self.data['question'].apply(lambda x: '<start> ' + x + ' <end>')
+            self.data['answer'] = self.data['answer'].apply(lambda x: '<start> ' + x + ' <end>')
 
     def tokenize_data(self):
         self.tokenizer_input.fit_on_texts(self.data['question'])
         self.tokenizer_output.fit_on_texts(self.data['answer'])
+
+        # char level
+        if self.char_level == True:
+            #Set index_word 0 to <pad>
+            self.tokenizer_input.index_word[0] = '<pad>'
+            self.tokenizer_output.index_word[0] = '<pad>'
+
+            self.tokenizer_input.word_index['<start>'] = len(self.tokenizer_input.word_index)+1
+            self.tokenizer_input.word_index['<end>'] = len(self.tokenizer_input.word_index)+1
+            self.tokenizer_output.word_index['<start>'] = len(self.tokenizer_output.word_index)+1
+            self.tokenizer_output.word_index['<end>'] = len(self.tokenizer_output.word_index)+1
+
+            #Set <start> and <end> to max_index
+            self.tokenizer_input.index_word[self.tokenizer_input.word_index['<start>']] = '<start>'
+            self.tokenizer_input.index_word[self.tokenizer_input.word_index['<end>']] = '<end>'
+            self.tokenizer_output.index_word[self.tokenizer_output.word_index['<start>']] = '<start>'
+            self.tokenizer_output.index_word[self.tokenizer_output.word_index['<end>']] = '<end>'
+
+            #Set word_index <pad> to 0
+            self.tokenizer_input.word_index['<pad>'] = 0
+            self.tokenizer_output.word_index['<pad>'] = 0
+
 
     def split_data(self, test_size=0.2, random_state=42):
         train, test = train_test_split(self.data, test_size=test_size, random_state=random_state)

@@ -74,10 +74,10 @@ class ChatBot:
 
     def chat(self):
         while True:
-            text = input("Enter question: ")
+            text = input("Enter your prompt: ")
             output, _ = self.search(text)
             answer = self.tokenizer_output.sequences_to_texts([output.numpy()])[0]
-            print(f"Answer: {answer}\n")
+            print(f"Bot: {answer}\n")
 
 
 if __name__ == '__main__':

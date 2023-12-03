@@ -17,6 +17,29 @@ test_signature = [
     tf.TensorSpec(shape=(None, None), dtype=tf.int64),
 ]
 
+class EarlyStoppping(tf.keras.callbacks.Callback):
+    def __init__(self, model, patience=0, min_delta=0):
+        super(EarlyStoppping, self).__init__()
+        self.model = model
+        self.patience = patience
+        self.min_delta = min_delta
+        self.wait = 0
+        self.stopped_epoch = 0
+        self.best = np.Inf
+        self.best_weights = None
+
+    def on_epoch_end(self, epoch, logs=None):
+        current = logs.get('val_loss')
+        if np.less(current - self.min_delta, self.best):
+            self.best = current
+            self.wait = 0
+            self.best_weights = self.model.get_weights()
+        else:
+            self.wait += 1
+            print("Early stopping ({}/{})".format(self.wait, self.patience))
+            if self.wait >= self.patience:
+                self.stopped_epoch = epoch
+
 class CustomSchedule(LearningRateSchedule):
     def __init__(self, d_model, warmup_steps=5000):
         super(CustomSchedule, self).__init__()
@@ -42,6 +65,8 @@ class CustomTrainer:
         self.test_loss = tf.keras.metrics.Mean(name='test_loss')
         self.test_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
             name='test_accuracy')
+        self.early_stopping = EarlyStoppping(
+            self.transformer, patience=5, min_delta=0.0001)
         self.ckpt_manager = tf.train.CheckpointManager(tf.train.Checkpoint(transformer=self.transformer, optimizer=self.optimizer),
                                                        "./checkpoints_test/train", max_to_keep=5)
 
@@ -161,6 +186,13 @@ class CustomTrainer:
                               ('val_acc', self.test_accuracy.result())]
                 pb.add(inp.shape[0], values=val_values)
 
+            self.early_stopping.on_epoch_end(epoch, logs={'val_loss': self.test_loss.result()})
+
+            #Early stopping using early_stopping callback
+            if self.early_stopping.stopped_epoch > 0:
+                print("Epoch %05d: early stopping" % (epoch))
+                break
+
             if epoch % 5 == 0:
                 ckpt_save_path = self.ckpt_manager.save()
                 print('Saving checkpoint for epoch {} at {}'.format(
@@ -168,9 +200,12 @@ class CustomTrainer:
 
             output, _ = self.search("how are you?", self.transformer,
                                     self.data_processor.tokenizer_input, self.data_processor.tokenizer_output)
-            print("Question: How are you?")
-            print("Answer: {}".format(
+            print("Prompt: How are you?")
+            if self.data_processor.char_level == False:
+                print("Bot: {}".format(
                 self.data_processor.tokenizer_output.sequences_to_texts([output.numpy()])[0]))
+            else:
+                print("Answer: {}".format("".join([self.data_processor.tokenizer_output.index_word[i] for i in output.numpy() if i < len(self.data_processor.tokenizer_output.index_word)])))
 
 if __name__ == "__main__":
     data_processor = DataProcessor(file_path='reddit.csv')
